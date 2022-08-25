@@ -675,7 +675,7 @@ def exportGroundInfo():
 
 
 def OpenReadMe():
-    webbrowser.open('https://github.com/CSharpM7/LVDSpec/tree/main/LvdSpec')
+    webbrowser.open('https://github.com/CSharpM7/LVDSpec')
 def OpenWiki():
     webbrowser.open('https://github.com/CSharpM7/LVDSpec/wiki')
 
