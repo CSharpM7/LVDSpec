@@ -781,7 +781,7 @@ def CreateCanvas():
     root.menubar = Menu(root)
     root.filemenu = Menu(root.menubar, tearoff=0)
     root.filemenu.add_command(label="Load Stage Collision File", command=SetYaml)
-    root.filemenu.add_command(label="Export Patch File To Mod", command=exportGroundInfo)
+    root.filemenu.add_command(label="Export Patch File", command=exportGroundInfo)
     root.filemenu.add_separator()
     root.filemenu.add_command(label="Exit", command=quit)
     root.menubar.add_cascade(label="File", menu=root.filemenu)
