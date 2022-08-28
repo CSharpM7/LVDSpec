@@ -18,6 +18,17 @@ import yaml
 import configparser
 
 import re
+reAlpha='[^0-9,.-]'
+def GetStringAsNumber(value):
+    value = re.sub(reAlpha, '', value)
+    #If empty, return
+    if (value==""): return -1,False
+    try:
+        value=float(value)
+        return value,True
+    except:
+        return -1,False
+
 import math
 
 #create ui for program
@@ -421,6 +432,8 @@ def LoadLastYaml():
     Main()
 
 def SetYaml(automatic=False):
+    SetData(root.maxCollisionsTag,root.stageDefaults[root.maxCollisionsTag])
+
     originalYaml = root.levelFile
     root.levelFile=""
     #Attempt to find automatically first, if valid directory file exists
@@ -460,13 +473,13 @@ def SetYaml(automatic=False):
                 root.levelFile=originalYaml
             return
 
-        #If it's the same file, do nothing
-        if (desiredFile == originalYaml):
-            return
         #If accidentally selected the Yaml version instead of the lvd verison, select yaml instead
         possibleYaml = desiredFile.replace(".lvd",".yaml")
-        if (os.path.exists(possibleYaml)):
-            desiredFile=possibleYaml
+        if (os.path.exists(possibleYaml) and ".lvd" in desiredFile):
+            res = messagebox.askquestion(root.programName,"A .yaml version exists of "+os.path.basename(desiredFile)+". If you select the lvd, this yaml will be overwritten."+
+                "\nSelect .lvd and overwrite its .yaml?")
+            if res != 'yes':
+                desiredFile=possibleYaml
 
         desiredFileName = os.path.basename(desiredFile)
         extension = os.path.splitext(desiredFileName)[1]
@@ -511,9 +524,6 @@ def LoadYaml():
     if (root.levelFile != ""):
         SetStageFromLVD() 
 
-        config.set("DEFAULT","levelFile",root.levelFile)
-        with open('config.ini', 'w+') as configfile:
-            config.write(configfile)
     Main() 
 
 
@@ -688,6 +698,7 @@ def OnSteveSliderUpdate(variable):
     value=float(value)
     print("Updated "+variable+" with "+str(value))
     root.steveTable.update({variable:value})
+    #Until we know what sensitivity and offset do, we can't update the steve block
     #DrawSteveBlock()
 
 def OnOriginXSliderUpdate(event):
@@ -703,23 +714,11 @@ def OnSensitivitySliderUpdate(event):
     variable = "Steve_cell_sensitivity"
     OnSteveSliderUpdate(variable)
 
-reAlpha='[^0-9,.-]'
 def OnSettingUpdated(variable):
     #Get Value, only take #s,- and .
     value = root.string_vars[variable].get()
-    value = re.sub(reAlpha, '', value)
-    #If empty, return
-    if (value==""): return
-
-    #Make sure the value is a valid float
-    validValue=True
-    try:
-        value=float(value)
-    except:
-        validValue=False
-        print(value+" is invalid for "+variable)
-
-    if (not validValue): return
+    value,isValidValue = GetStringAsNumber(value)
+    if (not isValidValue): return
     value=float(value)
       
     #Convert Collisions to int 
@@ -732,15 +731,17 @@ def OnSettingUpdated(variable):
     elif ("Steve_origin" in variable):
         value=clamp(value,-10,10)
 
-    print("Updated "+variable+" with "+str(value))
     SetData(variable,value)
+    #print("Updated "+variable+" with "+str(value))
 
     if ("Canvas" in variable):
         DrawCollisions()
     else:
-        DrawSteveBlock()
-        if ("Bottom" in variable):
+        if ("Stage" in variable):
             DrawBoundaries()
+        elif ("Steve" in variable):
+            DrawSteveBlock()
+        DrawGrid()
 
 def OnSteveSettingUpdated(*args):
     if (root.Loading):
@@ -874,11 +875,18 @@ def CreateCanvas():
 
     #Wizard Button
     button = Button(root.fr_SteveSettings, text="Wizard", command=OnWizard)
-    button.pack(side = RIGHT, fill = BOTH,expand=1,pady=10,padx=4)
+    button.pack(side = RIGHT, fill = BOTH,expand=1,pady=8,padx=4)
     #Default Button
     button = Button(root.fr_SteveSettings, text="Reset Values To Default", command=OnDefault)
-    button.pack(side = RIGHT, fill = BOTH,expand=1,pady=10,padx=4)
+    button.pack(side = RIGHT, fill = BOTH,expand=1,pady=8,padx=4)
+    #ReParse Button
+    button = Button(root.fr_StageSettings, text="Reparse Stage Data", command=OnReParse)
+    button.pack(side = RIGHT, fill = BOTH,expand=1,pady=8,padx=4)
 
+def OnReParse():
+    ParseYaml()
+    RefreshValues()
+    RefreshCanvas()
 
 def OnDefault():
     res = messagebox.askquestion("LVD Wizard: "+os.path.basename(root.levelFile), "Reset Steve parameters to their original values?")
@@ -887,19 +895,19 @@ def OnDefault():
     ParseSteve(True)
     RefreshValues()
     RefreshCanvas()
+
 def OnWizard():
     res = messagebox.askquestion("LVD Wizard: "+os.path.basename(root.levelFile), "Make sure you have all these variables set in Stage Data for this to work!"
         "\n"
         "\nRadius (Radius of the main ring)"
-        "\nTop (Y Position of highest platform)"
-        "\nBase (Y Position of baseline on the main ring, should be a spawn point's y)"
+        "\nTop (Y Position of highest platform, could be a spawn point's y)"
         "\nBottom (Y Position of lowest point on the main ring)"
+        "\nFloorY (Y Position of baseline on the main ring, should be a spawn point's y)"
         "\nOrigin (A multiple of 50 that is as close to 0,0 as possible. For stages that have been shifted up/left, this could be 0,200 for a highup stage, or 100,0 for a stage that's far to the right)"
         "\n"
         "\nReady to start Wizard?")
     if res != 'yes':
         return
-    isWall= (GetData("Stage_Bottom")<GetData("Camera_Bottom")+5)
     #BF (plankable)
     #Side: Steve40,Cam170
     #Bottom: Steve30,Cam-80
@@ -927,31 +935,41 @@ def OnWizard():
     #BottomStage: -23.5
     #Radius: 83 (77 or 1.927)
 
-    #Origin should do something with radius, maybe?
+    #Buffer between TopPlat's position and the highest block, and various other Y parameters
+    BufferY=20
+
+    stageHeight = abs(GetData("Stage_FloorY")-GetData("Stage_Bottom"))
+    isWall= (GetData("Stage_Bottom")<GetData("Camera_Bottom")+5)
+    if (isWall):
+        stageHeight= abs(GetData("Stage_FloorY")-GetData("Camera_Bottom"))
+    print("Wizard: Stage is using wall:"+str(isWall))
+
+
+    #Origin should do something with CameraCenter
     cameraCenter = GetData("Camera_CenterX")
-    desiredOriginX= (cameraCenter % 10) + (round(GetData("Stage_Radius"),1) % 10)
+    #desiredOriginX= (cameraCenter + (round(GetData("Stage_Radius"),1)/2 )) % 10
+    desiredOriginX = cameraCenter%10
     desiredOriginY=GetData("Stage_FloorY") % 10
 
-    #SteveBottom seems to be CamBottom-StageBase
-    desiredBottom = GetData("Camera_Bottom")-GetData("Stage_Bottom")
+    #SteveBottom should be the StageFloor-(3 blocks)
+    target=GetData("Stage_FloorY")-30
     if (isWall):
-        stageMiddle=abs(GetData("Stage_OriginY")-GetData("Camera_Bottom"))/2
-        desiredBottom=stageMiddle-10
-    desiredBottom=abs(round(desiredBottom))
+        target=target-10
+    desiredBottom = abs(GetData("Camera_Bottom")-target)
+    #If for some reason the bottom is lower than the bottom of the camera, set it to 0
+    desiredBottom=max(round(desiredBottom),0)
 
-    #SteveSide seems to be (CamSide-Radius)/2 where Radius is shifted by OriginX
-    desiredSide = ((GetData("Camera_Right")-(GetData("Stage_Radius")+GetData("Stage_OriginX")))/2)-GetData("Stage_OriginX")
+    #SteveSide seems to be the middle of Camera and the rightmost part of the stage (found by combining radius and origin)
+    shiftedCenter=GetData("Stage_Radius")+GetData("Stage_OriginX")
+    desiredSide = ((GetData("Camera_Right")-shiftedCenter)/2)-GetData("Stage_OriginX")
     desiredSide=math.floor(desiredSide)
 
-    #Buffer between TopPlat's position and the highest block
-    TopBuffer=20
     #For TopFromBase, we'll take the median of CameraTop and the base of the stage
     TopFromBase=math.floor((GetData("Camera_Top")-GetData("Stage_FloorY"))/2)
     #For TopPlat, we'll take Stage_Top to the nearest 10, offset it by originY
     TopPlat = (math.ceil(GetData("Stage_Top")/10)*10)+desiredOriginY
-    TopFromPlat=math.floor((GetData("Camera_Top")-TopPlat-TopBuffer))
-    print("Base:"+str(TopFromBase)+" Plat:"+str(TopFromPlat))
-    print("")
+    TopFromPlat=math.floor((GetData("Camera_Top")-TopPlat-BufferY))
+    print("Wizard: TopFromBase:"+str(TopFromBase)+"; FromPlat:"+str(TopFromPlat))
     #Pick whichever is the smallest amount
     desiredTop=min(TopFromBase,TopFromPlat)
 
@@ -961,96 +979,110 @@ def OnWizard():
     SetData("Steve_Bottom",desiredBottom)
     SetData("Steve_origin_x",desiredOriginX)
     SetData("Steve_origin_Y",desiredOriginY)
+    print("Wizard finished!")
     RefreshValues()
     messagebox.showinfo(root.programName,"Steve parameters automatically set!")
 
 
 #Load info from yaml into our canvas
 def ParseYaml():
-    if (root.levelFile!=""):
-        print("Parsing yaml:"+root.levelFile)
-        with open(root.levelFile, "r") as stream:
-            try:
-                root.yaml = yaml.safe_load(stream)
-            except yaml.YAMLError as exc:
-                print(exc)
-                root.destroy()
-                sys.exit("Yaml exploded")
+    if (root.levelFile==""): return
 
+    print("Parsing yaml:"+root.levelFile)
+    with open(root.levelFile, "r") as stream:
+        try:
+            root.yaml = yaml.safe_load(stream)
+        except yaml.YAMLError as exc:
+            messagebox.showerror(root.programName+":"+os.path.basename(root.levelFile),"FATAL"+exc)
+            config.set("DEFAULT","levelFile","")
+            with open('config.ini', 'w+') as configfile:
+                config.write(configfile)
+
+            root.destroy()
+            sys.exit("Yaml exploded")
+
+    try:
+        stageDataTableUpdates = {}
+        stageDataTableUpdates.update(root.stageDefaults)
         root.collisions=[]
         spawns=[]
         for i in root.yaml:
             #print(i)
             #Get Camera Info
             if (i=="camera"):
-                cameraLeftValue = float(root.yaml[i][0]["left"])
-                cameraRightValue = float(root.yaml[i][0]["right"])
-                cameraTopValue = float(root.yaml[i][0]["top"])
-                cameraBottomValue = float(root.yaml[i][0]["bottom"])
+                SetData("Camera_Left",float(root.yaml[i][0]["left"]))
+                SetData("Camera_Right",float(root.yaml[i][0]["right"]))
+                SetData("Camera_Top",float(root.yaml[i][0]["top"]))
+                SetData("Camera_Bottom",float(root.yaml[i][0]["bottom"]))
             #get boundary Info
             elif (i=="blastzones"):
-                blastLeftValue = float(root.yaml[i][0]["left"])
-                blastRightValue = float(root.yaml[i][0]["right"])
-                blastTopValue = float(root.yaml[i][0]["top"])
-                blastBottomValue = float(root.yaml[i][0]["bottom"])
+                SetData("Blast_Left",float(root.yaml[i][0]["left"]))
+                SetData("Blast_Right",float(root.yaml[i][0]["right"]))
+                SetData("Blast_Top",float(root.yaml[i][0]["top"]))
+                SetData("Blast_Bottom",float(root.yaml[i][0]["bottom"]))
             #get collision Info
             elif (i=="collisions"):
                 for c in root.yaml[i]:
-                    root.collisions.append(c["verts"])
+                    #Some yamls have verticies instead of verts
+                    vertices = "verts"
+                    if (not vertices in c):
+                        vertices="vertices"
+                    root.collisions.append(c[vertices])
             #get spawn
             elif (i=="spawns"):
                 for s in root.yaml[i]:
                     pos_y = s["pos"]["y"]
                     spawns.append(float(pos_y))
 
+        print("Camera / Blast")
         #Parse stage data
         largestX=0
-        originX=(cameraLeftValue+cameraRightValue)/2
-        originY=(cameraTopValue+cameraBottomValue)/2
-        highestSpawn=-100 if (len(spawns)>0) else originY
-        lowestSpawn=100 if (len(spawns)>0) else originY
-        lowestY=0
+        cameraLeftValue=GetData("Camera_Left")
+        cameraRightValue=GetData("Camera_Right")
+        cameraBottomValue=GetData("Camera_Bottom")
+        originX=GetData("Camera_CenterX")
+        originY=GetData("Camera_CenterY")
+        highestSpawn=-1000 if (len(spawns)>0) else originY
+        lowestSpawn=1000 if (len(spawns)>0) else originY
+        lowestY=1000
         for s in spawns:
             if (s>highestSpawn):
                 highestSpawn=s
-            elif (s<lowestSpawn):
+            if (s<lowestSpawn):
                 lowestSpawn=s
 
+        print("Spawn")
+        maxCol = GetData(root.maxCollisionsTag)
+        currentCol = 0
         for c in root.collisions:
             for vert in range(len(c)-1):
                 x1=float(c[vert]["x"])
                 y1=float(c[vert]["y"])
-                #Make sure largestX and lowestY is in between camera boundaries
+                #Make sure largestX is in between camera boundaries
                 if (x1>largestX and cameraLeftValue<x1 and x1<cameraRightValue):
                     largestX=x1
-                if (y1<lowestY and cameraBottomValue<y1 and y1<cameraTopValue):
+                #Make sure lowestY is in between blast boundaries
+                if (y1<lowestY and cameraBottomValue<y1):
                     lowestY=y1
-        stageRadius=min(largestX,root.stageLimit)
-        stageTop=highestSpawn
-        stageFloorY= lowestSpawn
-        stageOriginX= math.floor(originX/100)*100
-        stageOriginY= math.floor(originY/100)*100
-        stageBottom=lowestY
 
-    stageDataTableUpdates={
-    "Camera_Left":cameraLeftValue,
-    "Camera_Right":cameraRightValue,
-    "Camera_Top":cameraTopValue,
-    "Camera_Bottom":cameraBottomValue,
-    "Blast_Left":blastLeftValue,
-    "Blast_Right":blastRightValue,
-    "Blast_Top":blastTopValue,
-    "Blast_Bottom":blastBottomValue,
-    "Stage_Radius":stageRadius,
-    "Stage_FloorY":stageFloorY,
-    "Stage_Top":stageTop,
-    "Stage_Bottom": stageBottom,
-    "Stage_OriginX":stageOriginX,
-    "Stage_OriginY":stageOriginY,
-    }
-    for d in stageDataTableUpdates:
-        SetData(d,stageDataTableUpdates[d])
+            #If next collision is greater than maxVisible, then break
+            currentCol=currentCol+1
+            if (currentCol>=maxCol):
+                break
+        SetData("Stage_Radius",min(largestX,root.stageLimit))
+        SetData("Stage_Top",highestSpawn)
+        SetData("Stage_FloorY", lowestSpawn)
+        SetData("Stage_OriginX", math.floor(originX/50)*50)
+        SetData("Stage_OriginY", math.floor(originY/50)*50)
+        SetData("Stage_Bottom",lowestY)
+    except Exception as exc:
+        messagebox.showerror(root.programName+":"+os.path.basename(root.levelFile),"FATAL: "+str(exc))
+        config.set("DEFAULT","levelFile","")
+        with open('config.ini', 'w+') as configfile:
+            config.write(configfile)
 
+        root.destroy()
+        sys.exit("Yaml exploded")
 
 root.my_canvas = None
 
@@ -1104,6 +1136,7 @@ def DrawSteveBlock():
     x2,y2 = GetAdjustedCoordinates(x2,y2)
     root.my_canvas.coords(root.steveArea,x1,y1,x2,y2)
 
+def DrawGrid():
     #Create Grid for Steveblock
     root.my_canvas.delete('grid_line')
 
@@ -1112,9 +1145,9 @@ def DrawSteveBlock():
     xO,yO = GetAdjustedCoordinates(xO,yO)
     maxX=int(GetData("Stage_Radius"))+10
     minY=-20
-    maxY=20
+    maxY=30
     #Vertical Lines
-    for i in range(-maxX,maxX+1,10):
+    for i in range(-maxX,maxX,10):
         root.my_canvas.create_line([(xO+i, yO-maxY), (xO+i, yO-minY)], tag='grid_line',fill='dark green')
     #Horizontal Lines
     for i in range(minY,maxY+1,10):
@@ -1128,9 +1161,18 @@ def DrawBoundaries():
 
     #Draw guidelines for stuff
     root.my_canvas.delete('guide_line')
+
     stageBottom = GetData("Stage_Bottom")
     empty,stageBottom = GetAdjustedCoordinates(0,stageBottom)
-    root.my_canvas.create_line([(x1, stageBottom), (x2,stageBottom)], tag='guide_line',fill='black')
+    root.my_canvas.create_line([(x1, stageBottom), (x2,stageBottom)], tag='guide_line',fill='grey')
+
+    stageFloor = GetData("Stage_FloorY")
+    empty,stageFloor = GetAdjustedCoordinates(0,stageFloor)
+    root.my_canvas.create_line([(x1, stageFloor), (x2,stageFloor)], tag='guide_line',fill='grey')
+
+    stageTop = GetData("Stage_Top")
+    empty,stageTop = GetAdjustedCoordinates(0,stageTop)
+    root.my_canvas.create_line([(x1, stageTop), (x2,stageTop)], tag='guide_line',fill='grey')
 
     x1,y1 = GetAdjustedCoordinates(GetData("Blast_Left"),GetData("Blast_Top"))
     x2,y2 = GetAdjustedCoordinates(GetData("Blast_Right"),GetData("Blast_Bottom"))
@@ -1152,6 +1194,7 @@ def DrawCollisions():
 #If yaml file is reloaded, then you should call this
 def RefreshCanvas():
     DrawSteveBlock()
+    DrawGrid()
     DrawBoundaries()
     DrawCollisions()
 
@@ -1200,6 +1243,9 @@ def Main():
     RefreshCanvas()
     root.FirstLoad=False
     root.Loading=False
+    config.set("DEFAULT","levelFile",root.levelFile)
+    with open('config.ini', 'w+') as configfile:
+        config.write(configfile)
 
 def quit():
     root.withdraw()

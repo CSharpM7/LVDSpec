@@ -41,3 +41,7 @@ When you're finished, go to File>Export Patch File. This will create a patch fil
 | **Bottom**: Lowest part of the main stage. Walled stages should have their Bottom value lower than their Camera.Bottom value |
 | **FloorY**: Y position of the lowest floor of the stage, often the lowest spawn point |
 | **Origin**: Often 0,0; some stages may be shifted up by 200 to avoid hardcoded vertices. Set this to a multiple of 10 so that the Steve Grid shows properly |
+
+# Special Thanks
+
+[jam1garner](https://github.com/jam1garner) - yamlvd program
