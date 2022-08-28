@@ -38,10 +38,6 @@ root.title(root.programName)
 root.iconbitmap(os.getcwd() +"/icon.ico")
 root.withdraw()
 
-# Create workspace if needed
-root.workspace = os.getcwd() +"/workspace/"
-if (not os.path.exists(root.workspace)):
-    os.makedirs(root.workspace)
 
 # Check if yaml is installed
 package_name = 'yaml'
@@ -106,8 +102,15 @@ def UpdateTitle(newtitle=""):
     if (newtitle!=""):
         newtitle = " - "+newtitle
     root.title(root.programName+newtitle)
+def UpdateTitleAuto():
+    prefix = os.path.basename(root.workspace)
+    print("Title:"+prefix)
+    if (prefix=="workspace"):
+        prefix=root.stageName
+    newtitle = prefix+": "+os.path.basename(root.levelFile)
+    UpdateTitle(newtitle)
 
-root.arcDir = config["DEFAULT"]["arcDir"]
+root.arcDir = config["DEFAULT"].get("arcDir","")
 root.stageParamsFolderShortcut = r"/stage/common/shared/param/"
 
 #make sure that it is a validated parcel folder, otherwise quit
@@ -153,8 +156,8 @@ def SetStageParams():
         sys.exit("Invalid Folder")
 
     root.stageParams = root.arcDir + r"/export"+ root.stageParamsFolderShortcut
-    #Copy em for our working file
-    shutil.copy(root.stageParams + "groundconfig.prc", os.getcwd()+"/workspace/groundconfig.prc")
+    #Copy prc for our working file
+    shutil.copy(root.stageParams + "groundconfig.prc", root.workspace+"/groundconfig.prc")
 
 def SetYamlvd():
     messagebox.showinfo(root.programName,"Set Yamlvd directory")
@@ -182,24 +185,35 @@ def IsValidModFolder():
     return False
 
 #open folder dialogue
-def setModDir(quitOnFail=True):
+def SetWorkspace():
     quitOnFail=False
-    messagebox.showinfo(root.programName,"Select your mod's main folder")
-    root.modDir = filedialog.askdirectory(title = "Select your mod's main folder")
-    if (root.modDir == ""):
-        if (quitOnFail):
-            root.destroy()
-            sys.exit("Invalid folder")
+    root.workspace = filedialog.askdirectory(title = "Select your workspace folder")
+    if (root.workspace == ""):
+        root.workspace = os.getcwd() +"/workspace"
         return
-    if (IsValidModFolder() == False):
-        root.modDir=""
-        messagebox.showerror(root.programName,"Please select the root of your mod's folder! This folder should contain a stage folder within it!")
-        if (quitOnFail):
+    if (not os.path.exists(root.workspace+"/groundconfig.prc")):
+        if (IsValidArc() == False):
+            messagebox.showerror(root.programName,"FATAL: groundconfig.prc missing from StageParams")
             root.destroy()
-            sys.exit("Not a stage folder")
+            sys.exit("Invalid Folder")
+        shutil.copy(root.stageParams + "groundconfig.prc", root.workspace+"/groundconfig.prc")
+
+    UpdateTitleAuto()
+    config.set("DEFAULT","workspace",root.workspace)
+    with open('config.ini', 'w+') as configfile:
+        config.write(configfile)
         
+
+#Get or Set workspace
+root.workspace = config["DEFAULT"].get("workspace","")
+if (root.workspace == ""):
+    print("no workspace")
+    root.workspace = os.getcwd() +"/workspace"
+    if (not os.path.exists(root.workspace)):
+        os.makedirs(root.workspace)
+
 #Set Parcel Directory if needed
-root.parcelDir = config["DEFAULT"]["parcelDir"]
+root.parcelDir = config["DEFAULT"].get("parcelDir","")
 if (not os.path.isdir(root.parcelDir)):
     root.parcelDir = ""
 #Get or Set root.parcelDir
@@ -208,10 +222,10 @@ if (root.parcelDir == ""):
     SetParcel()
 
 #Set Arc Directory and StageParams if needed
-root.stageParams = config["DEFAULT"]["stageParamsLocation"]
+root.stageParams = config["DEFAULT"].get("stageParamsLocation","")
 if (not os.path.isdir(root.stageParams)):
     root.stageParams = ""
-if (not os.path.exists(os.getcwd() +"/workspace/groundconfig.prc")):
+if (not os.path.exists(root.workspace + "/groundconfig.prc")):
     root.stageParams=""
     
 #Get or Set root.stageParams
@@ -219,9 +233,11 @@ if (root.stageParams == ""):
     print("no arc")
     SetStageParams()
 
+
 config.set("DEFAULT","parcelDir",root.parcelDir)
 config.set("DEFAULT","arcDir",root.arcDir)
 config.set("DEFAULT","stageParamsLocation",root.stageParams)
+config.set("DEFAULT","workspace",root.workspace)
 with open('config.ini', 'w+') as configfile:
     config.write(configfile)
 
@@ -543,9 +559,6 @@ PARSE_File=0
 PARSE_Workspace=1
 PARSE_Source=2
 def ParseSteve(ParseType=0):
-    SetData("Steve_Side", 0)
-    SetData("Steve_Top",0)
-    SetData("Steve_Bottom", 0)
     if (root.stageName == ""):
         return
     tree = None
@@ -560,9 +573,15 @@ def ParseSteve(ParseType=0):
     if (ParseType == PARSE_File):
         workingGroundInfo = GetConfigFromYaml()
     elif (ParseType == PARSE_Workspace):
-        workingGroundInfo = root.workspace+"groundconfig_"+os.path.basename(root.levelFile).replace(".yaml",".prcxml")
+        workingGroundInfo = root.workspace+"/groundconfig_"+os.path.basename(root.levelFile).replace(".yaml",".prcxml")
+        if (not os.path.exists(workingGroundInfo)):
+            messagebox.showerror(root.programName,"No data for "+os.path.basename(root.levelFile)+" found in workspace")
+            return
+            
+    SetData("Steve_Side", 0)
+    SetData("Steve_Top",0)
+    SetData("Steve_Bottom", 0)
 
-    print("Info:"+workingGroundInfo)
     if (not ParseType==2):
         if (not os.path.exists(workingGroundInfo)):
             ParseType = 2
@@ -650,13 +669,14 @@ def SaveGroundInfoChanges():
 #def ReadPrcxml(file):
 
 def PatchWorkspace():
-    workspacePrcxml = os.getcwd() + r"/workspace/groundconfig.prcxml"
+    workspacePrcxml = root.workspace+"/groundconfig.prcxml"
     f = open(workspacePrcxml, "w")
     f.close()
 
     mainTree = None
     mainTreeRoot = None
 
+    patchCreated=False
     #For each PRCXML in the workspace (that isnt groundconfig), add it to the mainTree
     with open(workspacePrcxml, 'rb') as file:
         mainParser = ET.XMLParser(encoding ='utf-8')
@@ -664,6 +684,7 @@ def PatchWorkspace():
         mainTree = ET.ElementTree(mainTreeRoot)
 
         prcxmls = [f.path for f in os.scandir(root.workspace) if f.is_file()]
+
         for file in list(prcxmls):
             fileName = os.path.basename(file)
             fileName = os.path.basename(os.path.splitext(file)[0])
@@ -674,11 +695,16 @@ def PatchWorkspace():
                     tree = ET.parse(prcxml,parser)
                     treeRoot = tree.getroot()
                     if (len(treeRoot)>0):
+                        patchCreated=True
                         stageName = treeRoot[0].get('hash')
                         print(stageName)
                         mainTreeRoot.append(treeRoot[0])
         #Write XML
         mainTree.write(workspacePrcxml, encoding="utf-8", xml_declaration=True) 
+
+    if (not patchCreated):
+        messagebox.showwarning(root.programName,"No files to patch")
+        return
 
     parcel = root.parcelDir + r"/parcel.exe"
     workspacePrc = workspacePrcxml.replace(".prcxml",".prc")
@@ -728,7 +754,7 @@ def exportGroundInfo():
     print("Temp prc created!")
 
     #Patch our workspace's prc, as well
-    workingPrc = os.getcwd() + "/workspace/groundconfig.prc"
+    workingPrc = root.workspace + "/groundconfig.prc"
     if (os.path.exists(workingPrc)):
         subcall = [parcel,"patch",workingPrc,root.TempGroundInfo,workingPrc]
         with open('output.txt', 'a+') as stdout_file:
@@ -865,6 +891,7 @@ def CreateCanvas():
     root.filemenu.add_command(label="Load Stage Collision File", command=SetYaml)
     root.filemenu.add_command(label="Export Patch File", command=exportGroundInfo)
     root.filemenu.add_separator()
+    root.filemenu.add_command(label="Set Workspace", command=SetWorkspace)
     root.filemenu.add_command(label="Create Workspace Patch", command=PatchWorkspace)
     root.filemenu.add_separator()
     root.filemenu.add_command(label="Exit", command=quit)
@@ -983,7 +1010,7 @@ def OnDefault():
     RefreshCanvas()
 
 def OnWorkspace():
-    res = messagebox.askquestion("LVD Wizard: "+os.path.basename(root.levelFile), "Reset Steve parameters to the values from your workspace?")
+    res = messagebox.askquestion("LVD Wizard: "+os.path.basename(root.levelFile), "Load Steve parameters from your workspace?")
     if res != 'yes':
         return
     ParseSteve(PARSE_Workspace)
@@ -1326,7 +1353,7 @@ def RefreshValues():
 def Main():
     print("Running main: "+root.stageName)
     if (root.stageName!="" and os.path.exists(root.levelFile)):
-        UpdateTitle(root.stageName +": "+os.path.basename(root.levelFile))
+        UpdateTitleAuto()
 
     ParseSteve()
     ParseYaml()
