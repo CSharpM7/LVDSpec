@@ -37,6 +37,7 @@ root.programName="LVD Spec"
 root.title(root.programName)
 root.iconbitmap(os.getcwd() +"/icon.ico")
 root.withdraw()
+root.UnsavedChanges=False
 
 
 # Check if yaml is installed
@@ -99,15 +100,21 @@ config.read('config.ini')
 
 
 def UpdateTitle(newtitle=""):
+    prefix="*" if root.UnsavedChanges else ""
+    workspace= os.path.basename(root.workspace)
+    if (workspace.lower()=="workspace"):
+        workspace=""
+    else:
+        workspace = "("+workspace+")"
+
     if (newtitle!=""):
         newtitle = " - "+newtitle
-    root.title(root.programName+newtitle)
+
+    root.title(prefix+root.programName+workspace+newtitle)
+
 def UpdateTitleAuto():
-    prefix = os.path.basename(root.workspace)
-    print("Title:"+prefix)
-    if (prefix=="workspace"):
-        prefix=root.stageName
-    newtitle = prefix+": "+os.path.basename(root.levelFile)
+    filename = os.path.basename(root.levelFile)
+    newtitle = root.stageName+": "+filename
     UpdateTitle(newtitle)
 
 root.arcDir = config["DEFAULT"].get("arcDir","")
@@ -187,10 +194,10 @@ def IsValidModFolder():
 #open folder dialogue
 def SetWorkspace():
     quitOnFail=False
-    root.workspace = filedialog.askdirectory(title = "Select your workspace folder")
-    if (root.workspace == ""):
-        root.workspace = os.getcwd() +"/workspace"
+    newWorkspace = filedialog.askdirectory(title = "Select your workspace folder")
+    if (newWorkspace == ""):
         return
+    root.workspace = newWorkspace
     if (not os.path.exists(root.workspace+"/groundconfig.prc")):
         if (IsValidArc() == False):
             messagebox.showerror(root.programName,"FATAL: groundconfig.prc missing from StageParams")
@@ -483,7 +490,7 @@ def SetYaml(automatic=False):
             ('Yaml File', '*.yaml'),
             ('LVD File', '*lvd')
         )
-        desiredFile = filedialog.askopenfilename(title = "Search",filetypes=filetypes,initialdir = root.modParams)
+        desiredFile = filedialog.askopenfilename(title = "Load Level File",filetypes=filetypes,initialdir = root.modParams)
 
         if (desiredFile == ""):
             print("No lvd selected")
@@ -555,10 +562,7 @@ def GetConfigFromYaml():
     toReturn = toReturn+os.path.basename(root.levelFile).replace(".yaml",".prcxml")
     return toReturn
 
-PARSE_File=0
-PARSE_Workspace=1
-PARSE_Source=2
-def ParseSteve(ParseType=0):
+def ParseSteve(ParseFromWorkspace=True):
     if (root.stageName == ""):
         return
     tree = None
@@ -570,21 +574,19 @@ def ParseSteve(ParseType=0):
         return
 
     workingGroundInfo=""
-    if (ParseType == PARSE_File):
-        workingGroundInfo = GetConfigFromYaml()
-    elif (ParseType == PARSE_Workspace):
+    if (ParseFromWorkspace):
         workingGroundInfo = root.workspace+"/groundconfig_"+os.path.basename(root.levelFile).replace(".yaml",".prcxml")
-        if (not os.path.exists(workingGroundInfo)):
-            messagebox.showerror(root.programName,"No data for "+os.path.basename(root.levelFile)+" found in workspace")
-            return
-            
+        #if (not os.path.exists(workingGroundInfo)):
+        #    messagebox.showerror(root.programName,"No data for "+os.path.basename(root.levelFile)+" found in workspace")
+        #    return
+
     SetData("Steve_Side", 0)
     SetData("Steve_Top",0)
     SetData("Steve_Bottom", 0)
 
-    if (not ParseType==2):
+    if (ParseFromWorkspace):
         if (not os.path.exists(workingGroundInfo)):
-            ParseType = 2
+            ParseFromWorkspace=False
         else:
             #Make sure the mod has our desired stage
             hasStage = False
@@ -598,14 +600,14 @@ def ParseSteve(ParseType=0):
                         if (nodeName == root.stageName):
                             hasStage=True
                 break
-            ParseType = PARSE_Source if not hasStage else PARSE_File
+            ParseFromWorkspace = hasStage
             print("Current mod's groundconfig excludes the desired stage, using source instead")
 
     root.TempGroundInfo = os.getcwd() + r"\tempconfig.prcxml"
     f = open(root.TempGroundInfo, "w")
     f.close()
 
-    GroundInfo = sourceGroundInfo if ParseType==PARSE_Source else workingGroundInfo
+    GroundInfo = workingGroundInfo if ParseFromWorkspace else sourceGroundInfo
 
     print("Parsing Steve Data...")
     #Parse Steve data from main groundconfig file and place it in a temporary file
@@ -662,9 +664,11 @@ def SaveGroundInfoChanges():
         tree.write(root.TempGroundInfo)
 
     targetFile = GetConfigFromYaml()
-    targetFile = root.workspace + os.path.basename(targetFile)
-    #Copy the temp prcxml to the destination
+    targetFile = root.workspace + "/"+os.path.basename(targetFile)
+    #Copy the temp prcxml to our workspace
     shutil.copy(root.TempGroundInfo,targetFile)
+    root.UnsavedChanges=False
+    UpdateTitleAuto()
 
 #def ReadPrcxml(file):
 
@@ -684,7 +688,7 @@ def PatchWorkspace():
         mainTree = ET.ElementTree(mainTreeRoot)
 
         prcxmls = [f.path for f in os.scandir(root.workspace) if f.is_file()]
-
+        stages=[]
         for file in list(prcxmls):
             fileName = os.path.basename(file)
             fileName = os.path.basename(os.path.splitext(file)[0])
@@ -698,7 +702,16 @@ def PatchWorkspace():
                         patchCreated=True
                         stageName = treeRoot[0].get('hash')
                         print(stageName)
+                        isNewEntry = True
+                        if (stageName in stages):
+                            messagebox.showwarning(root.programName,"Multiple files in workspace use stage '"+stageName+"'!"+
+                                "\nValues will be overwritten, it is recommended that each stage has only one file in a workspace!")
+                            for type_tag in mainTreeRoot.findall("struct"):
+                                nodeName = type_tag.get('hash')
+                                if (nodeName==stageName):
+                                    mainTreeRoot.remove(type_tag)
                         mainTreeRoot.append(treeRoot[0])
+                        stages.append(stageName)
         #Write XML
         mainTree.write(workspacePrcxml, encoding="utf-8", xml_declaration=True) 
 
@@ -707,16 +720,18 @@ def PatchWorkspace():
         return
 
     parcel = root.parcelDir + r"/parcel.exe"
+
+    #Patch the source file with our workspacePrcxml, and create a clone as our workspaces' prc
+    sourcePrc = root.stageParams + "groundconfig.prc"
     workspacePrc = workspacePrcxml.replace(".prcxml",".prc")
-    subcall = [parcel,"patch",workspacePrc,workspacePrcxml,workspacePrc]
+    subcall = [parcel,"patch",sourcePrc,workspacePrcxml,workspacePrc]
     with open('output.txt', 'a+') as stdout_file:
         process_output = subprocess.run(subcall, stdout=stdout_file, stderr=stdout_file, text=True)
         print(process_output.__dict__)
 
-    print("Prc patched!")
+    print("Prc created!")
 
     #Create Prcx for mod
-    sourcePrc = root.stageParams + "groundconfig.prc"
     targetFile = workspacePrcxml.replace(".prcxml",".prcx")
 
     subcall = [parcel,"diff",sourcePrc,workspacePrc,targetFile]
@@ -726,8 +741,8 @@ def PatchWorkspace():
 
     print("Prcx created!")
 
-    messagebox.showinfo(root.programName,"Workspace prc patched!")
-
+    messagebox.showinfo(root.programName,"Workspace patch file and prc created!")
+    webbrowser.open(root.workspace)
 
 
 def exportGroundInfo():
@@ -847,6 +862,9 @@ def OnSettingUpdated(variable):
         if ("Stage" in variable):
             DrawBoundaries()
         elif ("Steve" in variable):
+            if (not root.UnsavedChanges):
+                root.UnsavedChanges=True
+                UpdateTitleAuto()
             DrawSteveBlock()
         DrawGrid()
 
@@ -869,6 +887,14 @@ def OnCanvasSettingUpdated(*args):
     OnSettingUpdated(variable)
 
 
+def LoadLevel():
+    if (root.UnsavedChanges):
+        res = messagebox.askquestion(root.programName,"There are unsaved changes! Are you sure you want to load a new file?"
+            ,icon = "warning")
+        if res != 'yes':
+            return
+    SetYaml()
+
 root.canvasWidth = 576
 root.canvasHeight = 480 
 #This should really only run once, maybe I should split this up but idk
@@ -888,19 +914,22 @@ def CreateCanvas():
     #File menu
     root.menubar = Menu(root)
     root.filemenu = Menu(root.menubar, tearoff=0)
-    root.filemenu.add_command(label="Load Stage Collision File", command=SetYaml)
-    root.filemenu.add_command(label="Export Patch File", command=exportGroundInfo)
+    root.filemenu.add_command(label="Load Stage Collision File", command=LoadLevel)
+    root.filemenu.add_command(label="Save To Workspace", command=SaveGroundInfoChanges)
     root.filemenu.add_separator()
-    root.filemenu.add_command(label="Set Workspace", command=SetWorkspace)
+    root.filemenu.add_command(label="Export Patch File To Mod", command=exportGroundInfo)
     root.filemenu.add_command(label="Create Workspace Patch", command=PatchWorkspace)
     root.filemenu.add_separator()
     root.filemenu.add_command(label="Exit", command=quit)
     root.menubar.add_cascade(label="File", menu=root.filemenu)
 
+    root.settingsmenu = Menu(root.menubar, tearoff=0)
+    root.settingsmenu.add_command(label="Set Workspace", command=SetWorkspace)
+    root.menubar.add_cascade(label="Settings", menu=root.settingsmenu)
+
     root.helpmenu = Menu(root.menubar, tearoff=0)
     root.helpmenu.add_command(label="About", command=OpenReadMe)
     root.helpmenu.add_command(label="Wiki", command=OpenWiki)
-    #root.helpmenu.add_command(label="About...", command=donothing)
     root.menubar.add_cascade(label="Help", menu=root.helpmenu)
     root.config(menu=root.menubar)
 
@@ -1005,15 +1034,20 @@ def OnDefault():
     res = messagebox.askquestion("LVD Wizard: "+os.path.basename(root.levelFile), "Reset Steve parameters to their original values?")
     if res != 'yes':
         return
-    ParseSteve(PARSE_Source)
+    ParseSteve()
     RefreshValues()
     RefreshCanvas()
 
 def OnWorkspace():
+    workingGroundInfo = root.workspace+"/groundconfig_"+os.path.basename(root.levelFile).replace(".yaml",".prcxml")
+    if (not os.path.exists(workingGroundInfo)):
+        messagebox.showerror(root.programName,"No data for "+os.path.basename(root.levelFile)+" found in workspace")
+        return
+
     res = messagebox.askquestion("LVD Wizard: "+os.path.basename(root.levelFile), "Load Steve parameters from your workspace?")
     if res != 'yes':
         return
-    ParseSteve(PARSE_Workspace)
+    ParseSteve(True)
     RefreshValues()
     RefreshCanvas()
 
@@ -1068,8 +1102,11 @@ def OnWizard():
 
     #Origin should do something with CameraCenter
     cameraCenter = GetData("Camera_CenterX")
-    #desiredOriginX= (cameraCenter + (round(GetData("Stage_Radius"),1)/2 )) % 10
-    desiredOriginX = cameraCenter%10
+    #I think originX is also 10-(Radius mod 10)
+    desiredOriginX= cameraCenter + (10-(GetData("Stage_Radius") % 10))
+    if (abs(desiredOriginX)>=10):
+        desiredOriginX=0
+    #desiredOriginX = cameraCenter%10
     desiredOriginY=GetData("Stage_FloorY") % 10
 
     #SteveBottom should be the StageFloor-(3 blocks)
@@ -1078,7 +1115,7 @@ def OnWizard():
         target=target-10
     desiredBottom = abs(GetData("Camera_Bottom")-target)
     #If for some reason the bottom is lower than the bottom of the camera, set it to 0
-    desiredBottom=max(round(desiredBottom),0)
+    desiredBottom=max(math.floor(desiredBottom),0)
 
     #SteveSide seems to be the middle of Camera and the rightmost part of the stage (found by combining radius and origin)
     shiftedCenter=GetData("Stage_Radius")+GetData("Stage_OriginX")
@@ -1130,13 +1167,13 @@ def ParseYaml():
         for i in root.yaml:
             #print(i)
             #Get Camera Info
-            if (i=="camera"):
+            if ("camera" in i and (not "shrunk" in i)):
                 SetData("Camera_Left",float(root.yaml[i][0]["left"]))
                 SetData("Camera_Right",float(root.yaml[i][0]["right"]))
                 SetData("Camera_Top",float(root.yaml[i][0]["top"]))
                 SetData("Camera_Bottom",float(root.yaml[i][0]["bottom"]))
             #get boundary Info
-            elif (i=="blastzones"):
+            elif ("blast" in i and (not "shrunk" in i)):
                 SetData("Blast_Left",float(root.yaml[i][0]["left"]))
                 SetData("Blast_Right",float(root.yaml[i][0]["right"]))
                 SetData("Blast_Top",float(root.yaml[i][0]["top"]))
@@ -1161,11 +1198,13 @@ def ParseYaml():
         cameraLeftValue=GetData("Camera_Left")
         cameraRightValue=GetData("Camera_Right")
         cameraBottomValue=GetData("Camera_Bottom")
+        cameraTopValue=GetData("Camera_Top")
         originX=GetData("Camera_CenterX")
         originY=GetData("Camera_CenterY")
         highestSpawn=-1000 if (len(spawns)>0) else originY
         lowestSpawn=1000 if (len(spawns)>0) else originY
         lowestY=1000
+        highestY=-1000
         for s in spawns:
             if (s>highestSpawn):
                 highestSpawn=s
@@ -1185,13 +1224,16 @@ def ParseYaml():
                 #Make sure lowestY is in between blast boundaries
                 if (y1<lowestY and cameraBottomValue<y1):
                     lowestY=y1
+                #Make sure highestY is in between camera boundaries
+                if (y1>highestY and cameraTopValue>y1):
+                    highestY=y1
 
             #If next collision is greater than maxVisible, then break
             currentCol=currentCol+1
             if (currentCol>=maxCol):
                 break
         SetData("Stage_Radius",min(largestX,root.stageLimit))
-        SetData("Stage_Top",highestSpawn)
+        SetData("Stage_Top",highestY)
         SetData("Stage_FloorY", lowestSpawn)
         SetData("Stage_OriginX", math.floor(originX/50)*50)
         SetData("Stage_OriginY", math.floor(originY/50)*50)
@@ -1264,11 +1306,12 @@ def DrawGrid():
     xO=float(GetData("Steve_origin_x"))+GetData("Stage_OriginX")
     yO=float(GetData("Steve_origin_y"))+GetData("Stage_OriginY")
     xO,yO = GetAdjustedCoordinates(xO,yO)
-    maxX=int(GetData("Stage_Radius"))+10
+    radius=GetData("Stage_Radius")
+    maxX=int(radius)+10
     minY=-20
     maxY=30
     #Vertical Lines
-    for i in range(-maxX,maxX,10):
+    for i in range(-maxX,maxX+1,10):
         root.my_canvas.create_line([(xO+i, yO-maxY), (xO+i, yO-minY)], tag='grid_line',fill='dark green')
     #Horizontal Lines
     for i in range(minY,maxY+1,10):
@@ -1294,6 +1337,13 @@ def DrawBoundaries():
     stageTop = GetData("Stage_Top")
     empty,stageTop = GetAdjustedCoordinates(0,stageTop)
     root.my_canvas.create_line([(x1, stageTop), (x2,stageTop)], tag='guide_line',fill='grey')
+
+    xO=float(GetData("Stage_OriginX"))
+    yO=float(GetData("Stage_OriginY"))
+    xO,yO = GetAdjustedCoordinates(xO,yO)
+    radius=GetData("Stage_Radius")
+    root.my_canvas.create_line([(xO-radius, stageTop), (xO-radius, stageFloor)], tag='guide_line',fill='grey',width=2)
+    root.my_canvas.create_line([(xO+radius, stageTop), (xO+radius, stageFloor)], tag='guide_line',fill='grey',width=2)
 
     x1,y1 = GetAdjustedCoordinates(GetData("Blast_Left"),GetData("Blast_Top"))
     x2,y2 = GetAdjustedCoordinates(GetData("Blast_Right"),GetData("Blast_Bottom"))
@@ -1348,12 +1398,14 @@ def RefreshValues():
                 entry.configure(state = disableSteve)
             else:
                 entry.configure(state = "disable")
-    root.filemenu.entryconfig("Export Patch File", state=disableSteve)
+    root.filemenu.entryconfig("Export Patch File To Mod", state=disableSteve)
 
 def Main():
     print("Running main: "+root.stageName)
     if (root.stageName!="" and os.path.exists(root.levelFile)):
         UpdateTitleAuto()
+    else:
+        UpdateTitle()
 
     ParseSteve()
     ParseYaml()
@@ -1369,8 +1421,14 @@ def Main():
         config.write(configfile)
 
 def quit():
+    if (root.UnsavedChanges):
+        res = messagebox.askquestion(root.programName,"There are unsaved changes! Are you sure you want to exit?"
+            ,icon = "warning")
+        if res != 'yes':
+            return
     root.withdraw()
     sys.exit("user exited")
 
 LoadLastYaml()
+root.protocol("WM_DELETE_WINDOW", quit)
 root.mainloop()
