@@ -11,8 +11,10 @@ TestMod/groundconfig.prc
 EsnHcxjXIAA7ibb.jpg
 *.jpg
 groundconfig.prc
+Workspace/*
 
 
 *.txt
 
 *.ini
+

@@ -38,6 +38,11 @@ root.title(root.programName)
 root.iconbitmap(os.getcwd() +"/icon.ico")
 root.withdraw()
 
+# Create workspace if needed
+root.workspace = os.getcwd() +"/workspace/"
+if (not os.path.exists(root.workspace)):
+    os.makedirs(root.workspace)
+
 # Check if yaml is installed
 package_name = 'yaml'
 
@@ -149,7 +154,7 @@ def SetStageParams():
 
     root.stageParams = root.arcDir + r"/export"+ root.stageParamsFolderShortcut
     #Copy em for our working file
-    shutil.copy(root.stageParams + "groundconfig.prc", os.getcwd()+"/groundconfig.prc")
+    shutil.copy(root.stageParams + "groundconfig.prc", os.getcwd()+"/workspace/groundconfig.prc")
 
 def SetYamlvd():
     messagebox.showinfo(root.programName,"Set Yamlvd directory")
@@ -206,6 +211,8 @@ if (root.parcelDir == ""):
 root.stageParams = config["DEFAULT"]["stageParamsLocation"]
 if (not os.path.isdir(root.stageParams)):
     root.stageParams = ""
+if (not os.path.exists(os.getcwd() +"/workspace/groundconfig.prc")):
+    root.stageParams=""
     
 #Get or Set root.stageParams
 if (root.stageParams == ""):
@@ -529,11 +536,13 @@ def LoadYaml():
 
 def GetConfigFromYaml():
     toReturn = root.modDir + root.stageParamsFolderShortcut + r"groundconfig_"
-    toReturn = toReturn+os.path.basename(root.levelFile).replace(".yaml","")
-    toReturn=toReturn+".prcxml"
+    toReturn = toReturn+os.path.basename(root.levelFile).replace(".yaml",".prcxml")
     return toReturn
 
-def ParseSteve(UseSource=False):
+PARSE_File=0
+PARSE_Workspace=1
+PARSE_Source=2
+def ParseSteve(ParseType=0):
     SetData("Steve_Side", 0)
     SetData("Steve_Top",0)
     SetData("Steve_Bottom", 0)
@@ -546,32 +555,38 @@ def ParseSteve(UseSource=False):
     if (not os.path.exists(sourceGroundInfo)):
         messagebox.showerror(root.programName,"Source Groundconfig missing from this folder")
         return
-    workingGroundInfo = GetConfigFromYaml()
+
+    workingGroundInfo=""
+    if (ParseType == PARSE_File):
+        workingGroundInfo = GetConfigFromYaml()
+    elif (ParseType == PARSE_Workspace):
+        workingGroundInfo = root.workspace+"groundconfig_"+os.path.basename(root.levelFile).replace(".yaml",".prcxml")
+
     print("Info:"+workingGroundInfo)
-    if (not UseSource):
+    if (not ParseType==2):
         if (not os.path.exists(workingGroundInfo)):
-            UseSource = True
+            ParseType = 2
         else:
             #Make sure the mod has our desired stage
             hasStage = False
-            with open(workingGroundInfo, 'rb') as file:
-                parser = ET.XMLParser(encoding ='utf-8')
-                tree = ET.parse(file,parser)
-                treeRoot = tree.getroot()
-                for type_tag in treeRoot.findall('struct'):
-                    nodeName = type_tag.get('hash')
-                    if (nodeName != root.stageName):
-                        treeRoot.remove(type_tag)
-                    else:
-                        hasStage=True
-            UseSource = not hasStage
+            while hasStage == False:
+                with open(workingGroundInfo, 'rb') as file:
+                    parser = ET.XMLParser(encoding ='utf-8')
+                    tree = ET.parse(file,parser)
+                    treeRoot = tree.getroot()
+                    for type_tag in treeRoot.findall('struct'):
+                        nodeName = type_tag.get('hash')
+                        if (nodeName == root.stageName):
+                            hasStage=True
+                break
+            ParseType = PARSE_Source if not hasStage else PARSE_File
             print("Current mod's groundconfig excludes the desired stage, using source instead")
 
     root.TempGroundInfo = os.getcwd() + r"\tempconfig.prcxml"
     f = open(root.TempGroundInfo, "w")
     f.close()
 
-    GroundInfo = sourceGroundInfo if UseSource else workingGroundInfo
+    GroundInfo = sourceGroundInfo if ParseType==PARSE_Source else workingGroundInfo
 
     print("Parsing Steve Data...")
     #Parse Steve data from main groundconfig file and place it in a temporary file
@@ -603,18 +618,8 @@ def ParseSteve(UseSource=False):
         tree.write(root.TempGroundInfo)
     print("")
 
-def exportGroundInfo():
-    tempPrc = os.getcwd() +"/temp.prc"
-    sourcePrc = root.stageParams + "groundconfig.prc"
-    parcel = root.parcelDir + r"/parcel.exe"
 
-    if (not os.path.exists(sourcePrc)):
-        messagebox.showerror(root.programName,"Cannot export without ArcExplorer's groundconfig.prc")
-        return
-    if (not os.path.exists(parcel)):
-        messagebox.showerror(root.programName,"Cannot export without Parcel")
-        return
-
+def SaveGroundInfoChanges():
     tree = None
     treeRoot = None
 
@@ -637,6 +642,82 @@ def exportGroundInfo():
                         child.text = str(value)
         tree.write(root.TempGroundInfo)
 
+    targetFile = GetConfigFromYaml()
+    targetFile = root.workspace + os.path.basename(targetFile)
+    #Copy the temp prcxml to the destination
+    shutil.copy(root.TempGroundInfo,targetFile)
+
+#def ReadPrcxml(file):
+
+def PatchWorkspace():
+    workspacePrcxml = os.getcwd() + r"/workspace/groundconfig.prcxml"
+    f = open(workspacePrcxml, "w")
+    f.close()
+
+    mainTree = None
+    mainTreeRoot = None
+
+    #For each PRCXML in the workspace (that isnt groundconfig), add it to the mainTree
+    with open(workspacePrcxml, 'rb') as file:
+        mainParser = ET.XMLParser(encoding ='utf-8')
+        mainTreeRoot = ET.Element("struct")
+        mainTree = ET.ElementTree(mainTreeRoot)
+
+        prcxmls = [f.path for f in os.scandir(root.workspace) if f.is_file()]
+        for file in list(prcxmls):
+            fileName = os.path.basename(file)
+            fileName = os.path.basename(os.path.splitext(file)[0])
+            fileExt = os.path.splitext(file)[1]
+            if (fileName != "groundconfig" and fileExt == ".prcxml"):
+                with open(file, 'rb') as prcxml:
+                    parser = ET.XMLParser(encoding ='utf-8')
+                    tree = ET.parse(prcxml,parser)
+                    treeRoot = tree.getroot()
+                    if (len(treeRoot)>0):
+                        stageName = treeRoot[0].get('hash')
+                        print(stageName)
+                        mainTreeRoot.append(treeRoot[0])
+        #Write XML
+        mainTree.write(workspacePrcxml, encoding="utf-8", xml_declaration=True) 
+
+    parcel = root.parcelDir + r"/parcel.exe"
+    workspacePrc = workspacePrcxml.replace(".prcxml",".prc")
+    subcall = [parcel,"patch",workspacePrc,workspacePrcxml,workspacePrc]
+    with open('output.txt', 'a+') as stdout_file:
+        process_output = subprocess.run(subcall, stdout=stdout_file, stderr=stdout_file, text=True)
+        print(process_output.__dict__)
+
+    print("Prc patched!")
+
+    #Create Prcx for mod
+    sourcePrc = root.stageParams + "groundconfig.prc"
+    targetFile = workspacePrcxml.replace(".prcxml",".prcx")
+
+    subcall = [parcel,"diff",sourcePrc,workspacePrc,targetFile]
+    with open('output.txt', 'a+') as stdout_file:
+        process_output = subprocess.run(subcall, stdout=stdout_file, stderr=stdout_file, text=True)
+        print(process_output.__dict__)
+
+    print("Prcx created!")
+
+    messagebox.showinfo(root.programName,"Workspace prc patched!")
+
+
+
+def exportGroundInfo():
+    tempPrc = os.getcwd() +"/temp.prc"
+    sourcePrc = root.stageParams + "groundconfig.prc"
+    parcel = root.parcelDir + r"/parcel.exe"
+
+    if (not os.path.exists(sourcePrc)):
+        messagebox.showerror(root.programName,"Cannot export without ArcExplorer's groundconfig.prc")
+        return
+    if (not os.path.exists(parcel)):
+        messagebox.showerror(root.programName,"Cannot export without Parcel")
+        return
+
+    #Changes must be saved before exporting
+    SaveGroundInfoChanges()
 
     #Patch the source file with our edited values, and create a clone as TempPRC
 
@@ -646,8 +727,8 @@ def exportGroundInfo():
         print(process_output.__dict__)
     print("Temp prc created!")
 
-    #Patch our working folder's prc, as well
-    workingPrc = os.getcwd() + "/groundconfig.prc"
+    #Patch our workspace's prc, as well
+    workingPrc = os.getcwd() + "/workspace/groundconfig.prc"
     if (os.path.exists(workingPrc)):
         subcall = [parcel,"patch",workingPrc,root.TempGroundInfo,workingPrc]
         with open('output.txt', 'a+') as stdout_file:
@@ -663,7 +744,7 @@ def exportGroundInfo():
     targetLocation = root.modDir + root.stageParamsFolderShortcut
     if (not os.path.exists(targetLocation)):
         os.makedirs(targetLocation)
-    targetFile = GetConfigFromYaml()
+    targetFile = targetLocation+"groundconfig.prcx"
 
     subcall = [parcel,"diff",sourcePrc,tempPrc,targetFile.replace(".prcxml",".prcx")]
     with open('output.txt', 'a+') as stdout_file:
@@ -673,7 +754,7 @@ def exportGroundInfo():
     print("Prcx created!")
 
     #Copy the temp prcxml to the destination
-    shutil.copy(root.TempGroundInfo,targetFile)
+    #shutil.copy(root.TempGroundInfo,targetFile)
 
     #Final part: remove temp and navigate to new folder
     os.remove(tempPrc)
@@ -784,6 +865,8 @@ def CreateCanvas():
     root.filemenu.add_command(label="Load Stage Collision File", command=SetYaml)
     root.filemenu.add_command(label="Export Patch File", command=exportGroundInfo)
     root.filemenu.add_separator()
+    root.filemenu.add_command(label="Create Workspace Patch", command=PatchWorkspace)
+    root.filemenu.add_separator()
     root.filemenu.add_command(label="Exit", command=quit)
     root.menubar.add_cascade(label="File", menu=root.filemenu)
 
@@ -873,12 +956,15 @@ def CreateCanvas():
         dataEntry.pack(side = RIGHT, fill = BOTH,expand=1)
         root.stageData.update({data:dataEntry})
 
-    #Wizard Button
-    button = Button(root.fr_SteveSettings, text="Wizard", command=OnWizard)
-    button.pack(side = RIGHT, fill = BOTH,expand=1,pady=8,padx=4)
     #Default Button
     button = Button(root.fr_SteveSettings, text="Reset Values To Default", command=OnDefault)
-    button.pack(side = RIGHT, fill = BOTH,expand=1,pady=8,padx=4)
+    button.pack(side = TOP, fill = BOTH,expand=1,pady=8,padx=4)
+    #Workspace Button
+    button = Button(root.fr_SteveSettings, text="Load Values From Workspace", command=OnWorkspace)
+    button.pack(side = TOP, fill = BOTH,expand=1,pady=8,padx=4)
+    #Wizard Button
+    button = Button(root.fr_SteveSettings, text="Wizard", command=OnWizard,width=10)
+    button.pack(side = TOP,expand=1,pady=8)
     #ReParse Button
     button = Button(root.fr_StageSettings, text="Reparse Stage Data", command=OnReParse)
     button.pack(side = RIGHT, fill = BOTH,expand=1,pady=8,padx=4)
@@ -892,7 +978,15 @@ def OnDefault():
     res = messagebox.askquestion("LVD Wizard: "+os.path.basename(root.levelFile), "Reset Steve parameters to their original values?")
     if res != 'yes':
         return
-    ParseSteve(True)
+    ParseSteve(PARSE_Source)
+    RefreshValues()
+    RefreshCanvas()
+
+def OnWorkspace():
+    res = messagebox.askquestion("LVD Wizard: "+os.path.basename(root.levelFile), "Reset Steve parameters to the values from your workspace?")
+    if res != 'yes':
+        return
+    ParseSteve(PARSE_Workspace)
     RefreshValues()
     RefreshCanvas()
 
