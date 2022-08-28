@@ -20,28 +20,6 @@ Edit the Steve LVD Settings values as you see fit. You can also use the Wizard b
 
 When you're finished, go to File>Export Patch File. This will create a patch file in whichever mod directory you are currently in under stage/common/shared/param. The name will be groundconfig + the name of the yaml file. The program will read from this file whenever you load the same yaml file again. Make sure you rename the new patch file after moving it to your mod on your SD Card. All changes will be saved to the groundconfig.prc in the LVDSpec folder, so if you're making a large mod pack, you might want to use this file instead of trying to combine several different patch files.
 
-## Terms
-
-| |
-| :- | 
-| **Steve LVD Settings** |
-| **material**: Material type of the weakest block |
-| **origin**: Used to offset the steve grid. Should be related to Stage Radius and FloorY|
-| **cell sensitivity**: A value between 0 and 1. Not sure what it does|
-| **line offset**: A value between 0 and 10. Not sure what it does |
-| **Side/Top/Bottom**: Distance from Camera where Steve cannot build a block |
-| **Camera Boundaries** |
-| **Left/Right/Top/Bottom**: Boundaries for the Camera of the stage |
-| **Center**: Center X and Y positions of the camera |
-| **Blastzone Boundaries** |
-| **Left/Right/Top/Bottom**: Boundaries for the Blastzone of the stage |
-| **Stage Data** |
-| **Radius**: Width of the stage divided by 2 |
-| **Top**: Highest platform; often the highest spawn point |
-| **Bottom**: Lowest part of the main stage. Walled stages should have their Bottom value lower than their Camera.Bottom value |
-| **FloorY**: Y position of the lowest floor of the stage, often the lowest spawn point |
-| **Origin**: Often 0,0; some stages may be shifted up by 200 to avoid hardcoded vertices. Set this to a multiple of 10 so that the Steve Grid shows properly |
-
 # Special Thanks
 
 [jam1garner](https://github.com/jam1garner) - yamlvd program
