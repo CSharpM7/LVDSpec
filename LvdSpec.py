@@ -41,6 +41,14 @@ if os.path.isfile(icon):
 root.withdraw()
 root.UnsavedChanges=False
 
+#Check for prcxmls
+sample = os.path.isfile(os.getcwd() + "/sample.yaml")
+groundconfig = os.path.isfile(os.getcwd() + "/groundconfig.yaml")
+if not (sample or groundconfig):
+    messagebox.showerror(root.programName,"Sample.yaml and groundconfig.yaml are missing in this directory!")
+    root.destroy()
+    sys.exit("User does not have .prcxmls")
+
 
 # Check if yaml is installed
 package_name = 'yaml'
