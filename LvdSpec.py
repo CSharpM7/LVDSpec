@@ -35,7 +35,9 @@ import math
 root = Tk()
 root.programName="LVD Spec"
 root.title(root.programName)
-root.iconbitmap(os.getcwd() +"/icon.ico")
+icon = os.getcwd() +"/icon.ico"
+if os.path.isfile(icon):
+    root.iconbitmap(icon)
 root.withdraw()
 root.UnsavedChanges=False
 

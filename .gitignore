@@ -12,7 +12,8 @@ EsnHcxjXIAA7ibb.jpg
 *.jpg
 groundconfig.prc
 Workspace/*
-
+output/*
+Test/*
 
 *.txt
 
